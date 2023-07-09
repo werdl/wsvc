@@ -4,18 +4,19 @@ import sys
 import json
 import pickle
 import shutil
+import inspect
 from time import gmtime, strftime, time
 
 
 class wsvc():
-    def __init__(self):
+    def __init__(self) -> None:
         """Check wsvc repo if exists, assigns to `self.init`"""
         self.init = True if os.path.exists(".wsvc") else False
         self.currentstate = ""
         for item in os.listdir():
             if item.startswith("wsvc-commit") and os.path.isdir(item):
                 shutil.rmtree(item)
-    def create(self, reponame: str, force=False):
+    def create(self, reponame: str, latestname: str="latest",force=False) -> bool:
         """Initialize wsvc repo (name `reponame`)at `savedir`, overwriting if `force`"""
         if not os.path.exists(".wsvc"):
             os.makedirs(".wsvc")
@@ -26,10 +27,10 @@ class wsvc():
                 logging.error("Path not created, dir already exists")
                 sys.exit(-1)
         with open(".wsvc/config.json", "w") as config:
-            data = json.dumps({"name": reponame, "created": strftime("%Y-%m-%d %H:%M:%S", gmtime())})
+            data = json.dumps({"name": reponame, "created": strftime("%Y-%m-%d %H:%M:%S", gmtime()),"latestmsg":latestname})
             config.write(data)
-
-    def check(self):
+        return 1
+    def check(self) -> bool:
         """Check if wsvc exists in folder"""
         return self.init
 
@@ -50,20 +51,23 @@ class wsvc():
                     tempserial[file_path] = content
 
         self.currentstate = pickle.dumps(tempserial).hex()
+        return 1
 
-
-    def stash(self, commitmsg):
-        """Stashes changes away under name `commitmsg` """
+    def stash(self, commitmsg) -> bool:
+        """Stashes changes away under name `commitmsg` 
+        Returns if successful"""
         if not os.path.exists(".wsvc"):
             os.makedirs(".wsvc")
         with open(".wsvc/{0}-{1}.wsvccommit".format(round(time()), commitmsg), "w") as file:
             file.write(self.currentstate)
         print("Changes stashed")
 
-    def grab(self, commit):
+    def grab(self, commit,dir="wsvc-commit"):
         """Grab commit `commit`"""
         files = next(os.walk(".wsvc"), (None, None, []))[2]
-        commit_directory = f"wsvc-commit-{commit}"
+        commit_directory = f"wsvc-commit-{commit}" if dir=="wsvc-commit" else "."
+        if dir!="wsvc-commit":
+            print("Overwriting current directory, -r/--restore flag given.")
         potentials = {}
         print(files)
         for file in files:
@@ -101,25 +105,97 @@ class wsvc():
             else:
                 with open(os.path.join(file_directory, file_name), "w") as f:
                     f.write(value)
+        return True
+    def help(self,function) -> str:
+        """Helps info on function `function`"""
+        classobj=wsvc()
+        method=getattr(classobj,function,None)
+        if inspect.ismethod(method):
+            method_source = inspect.getsource(method)
+            method_lines = method_source.strip().split('\n')
+            method_definition_line = method_lines[0].strip()
+            return f"""{method_definition_line}
+    - {method.__doc__}"""
+        else:
+            return f"{function} is not a valid wsvc operation"
     def delete(self):
         shutil.rmtree(".wsvc")
-
+class wsvcException(Exception):
+    def __init__(self,msg):
+        self.msg=msg
+    def __str__(self):
+        return self.msg
+    
+def err(reqlength=2):
+    """Returns if sys.argv isn't long enough"""
+    if len(sys.argv)<reqlength+1:
+        raise wsvcException("sys.argv too short")
 
 instance = wsvc()
 if len(sys.argv) > 1:
-
     action = sys.argv[1]
     if action == "init":
-        instance.create(reponame=sys.argv[2], force=False)
+        err()
+        if len(sys.argv)<4:
+            instance.create(reponame=sys.argv[2], force=False)
+        else:
+            instance.create(reponame=sys.argv[2], force=False,latestname=sys.argv[3])
     elif action == "del":
         instance.delete()
     elif action == "check":
         print("Exists:", instance.check())
     elif action == "stash":
+        err()
         instance.serialize()
         instance.stash(sys.argv[2])
     elif action == "grab":
-        instance.grab(sys.argv[2])
+        err()
+        if len(sys.argv)>3:
+            if sys.argv[3]=="-r" or sys.argv[3]=="--restore":
+                instance.grab(sys.argv[2],".")
+            else:
+                instance.grab(sys.argv[2])
+        else:
+            instance.grab(sys.argv[2])
+    elif action=="help":
+        if len(sys.argv)>2:
+            print(instance.help(sys.argv[2]))
+        else:
+            print("""
+# init - create new repo
+- required: reponame
+- optional: latestname (name of commit usually 'latest')
+
+# del - delete repo
+- required: None
+- optional: None
+
+# check - check repo existence
+- required: None
+- optional: None
+
+# stash - stash changes
+- required: commitname
+- optional: None
+
+# grab - grab changes
+- required: commitname
+- optional: -r/--restore flag (overwrites cwd)
+
+# help - print this page
+- required: None
+- optional: funcname (help for a specific function)
+	
+# push - stash under latest
+required: None
+optional: commitname for duplicate
+""")
+    elif action=="push":
+        instance.serialize()
+        with open(".wsvc/config.json") as config:
+            instance.stash(json.loads(config.read())["latestmsg"])
+        if len(sys.argv)>2:
+            instance.stash(sys.argv[2])
     else:
         print("Invalid action")
 else:
