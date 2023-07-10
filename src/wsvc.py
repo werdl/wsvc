@@ -120,6 +120,36 @@ class wsvc():
             return f"{function} is not a valid wsvc operation"
     def delete(self):
         shutil.rmtree(".wsvc")
+    def push_remote(self):
+        with open("credentials.json") as c:
+            con=c.read()
+            content=json.loads(con)
+        import ftplib
+        session = ftplib.FTP(content["server"],content["user"],content["pass"])
+        files = next(os.walk(".wsvc"), (None, None, []))[2]
+        potentials = {}
+        for file in files:
+            if ".wsvccommit" in file:
+                pass
+            else:
+                continue
+            _temp = file.split("-")
+            name = _temp[1].split(".")[0]
+            ts = _temp[0]
+            if name == "latest":
+                potentials[file] = ts
+        sortedpots = sorted(potentials.items(), key=lambda item: item[1])
+        file = open(".wsvc/" + sortedpots[-1][0],'rb')                  # file to send
+        with open(".wsvc/config.json") as conf:
+            data=json.loads(conf.read())
+        session.storbinary(f'STOR public_html/wsvc/{data["name"]}.wsvc', file)     # send the file
+        file.close()                                    # close file and FTP
+        session.quit()
+    def grab_remote(self,name):
+        import requests
+        response = requests.get(f"werdl.000webhostapp.com/wsvc/{name}.wsvc")
+        data = response.text
+        self.currentstate=data
 class wsvcException(Exception):
     def __init__(self,msg):
         self.msg=msg
@@ -196,6 +226,10 @@ optional: commitname for duplicate
             instance.stash(json.loads(config.read())["latestmsg"])
         if len(sys.argv)>2:
             instance.stash(sys.argv[2])
+    elif action=="pushrem":
+        instance.push_remote()
+    elif action=="grabrem":
+        instance.grab_remote()
     else:
         print("Invalid action")
 else:
